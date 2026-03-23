@@ -24,9 +24,9 @@ class StockValuationHistory(models.TransientModel):
         product_id = self.env.context.get("product_id", False)
         product_tmpl_id = self.env.context.get("product_tmpl_id", False)
         if product_id:
-            domain = Domain.AND([domain, [("id", "=", product_id)]])
+            domain &= Domain("id", "=", product_id)
         elif product_tmpl_id:
-            domain = Domain.AND([domain, [("product_tmpl_id", "=", product_tmpl_id)]])
+            domain &= Domain("product_tmpl_id", "=", product_tmpl_id)
         action["domain"] = domain
         if self.inventory_datetime:
             action_context = safe_eval(action["context"])

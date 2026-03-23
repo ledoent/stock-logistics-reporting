@@ -2,6 +2,8 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl.html).
 
 
+from odoo.fields import Domain
+
 from odoo.addons.stock_account.tests.common import TestStockValuationCommon
 
 
@@ -16,7 +18,7 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
         self._use_inventory_location_accounting()
         move = self._make_in_move(self.product_fifo_auto, quantity=1, unit_cost=10.0)
         inv_aml = self.aml_model.search(
-            [("product_id", "=", self.product_fifo_auto.id)]
+            Domain("product_id", "=", self.product_fifo_auto.id)
         )
         balance_inv = sum(inv_aml.mapped("balance"))
         self.assertEqual(balance_inv, 0.0)
@@ -50,7 +52,7 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
         move = self._make_in_move(self.product_fifo_auto, quantity=1.0, unit_cost=10.0)
         # This will not create any journal entry
         inv_aml = self.aml_model.search(
-            [("product_id", "=", self.product_fifo_auto.id)]
+            Domain("product_id", "=", self.product_fifo_auto.id)
         )
         balance_inv = sum(inv_aml.mapped("balance"))
         self.assertEqual(balance_inv, 0.0)
@@ -59,7 +61,7 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
         move2 = self._make_in_move(self.product_fifo_auto, quantity=2.0, unit_cost=20.0)
         # This will not create any journal entry
         inv_aml = self.aml_model.search(
-            [("product_id", "=", self.product_fifo_auto.id)]
+            Domain("product_id", "=", self.product_fifo_auto.id)
         )
         balance_inv = sum(inv_aml.mapped("balance"))
         self.assertEqual(balance_inv, 0.0)
@@ -90,7 +92,7 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
         self.assertEqual(self.product_fifo_auto.qty_discrepancy, 0.0)
         # check accounting entries
         inv_aml = self.aml_model.search(
-            [("product_id", "=", self.product_fifo_auto.id)]
+            Domain("product_id", "=", self.product_fifo_auto.id)
         )
         self.assertEqual(sum(inv_aml.mapped("balance")), 10.0)
         self.assertEqual(sum(inv_aml.mapped("quantity")), 1.0)
@@ -114,6 +116,6 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
 
         # Verify final accounting balance is zero
         inv_aml = self.aml_model.search(
-            [("product_id", "=", self.product_fifo_auto.id)]
+            Domain("product_id", "=", self.product_fifo_auto.id)
         )
         self.assertEqual(sum(inv_aml.mapped("balance")), 0.0)
