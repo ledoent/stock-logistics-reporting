@@ -91,8 +91,12 @@ class ProductProduct(models.Model):
         product_ids = list(product_to_account.keys())
         date_param = (to_date,) if to_date else ()
         aml_date_clause = "AND aml.date <= %s" if to_date else ""
+        # Direction from the balance sign, magnitude from abs(quantity): the
+        # valuation account mixes signed (stock-move) and unsigned (invoice/
+        # COGS) quantities, so trusting the stored sign double-counts outgoing.
         _signed_qty = (
-            "SUM(CASE WHEN aml.balance < 0 THEN -aml.quantity ELSE aml.quantity END)"
+            "SUM(CASE WHEN aml.balance < 0 "
+            "THEN -abs(aml.quantity) ELSE abs(aml.quantity) END)"
         )
         if kind == "value":
             aml_qty_expr = "SUM(aml.balance)"
@@ -190,7 +194,7 @@ class ProductProduct(models.Model):
                 SELECT aml.product_id, aml.account_id,
                     sum(aml.balance),
                     sum(CASE WHEN aml.balance < 0
-                        THEN -aml.quantity ELSE aml.quantity END)
+                        THEN -abs(aml.quantity) ELSE abs(aml.quantity) END)
                 FROM account_move_line AS aml
                 WHERE aml.product_id IN %s
                 AND aml.parent_state = 'posted'

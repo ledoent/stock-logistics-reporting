@@ -2,6 +2,7 @@
 # License AGPL-3.0 or later (https://www.gnu.org/licenses/agpl.html).
 
 
+from odoo import Command
 from odoo.fields import Domain
 
 from odoo.addons.stock_account.tests.common import TestStockValuationCommon
@@ -12,6 +13,51 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
     def setUpClass(cls):
         super().setUpClass()
         cls.aml_model = cls.env["account.move.line"]
+        cls.general_journal = cls.env["account.journal"].search(
+            [("type", "=", "general"), ("company_id", "=", cls.env.company.id)],
+            limit=1,
+        )
+
+    def _post_valuation_entry(self, product, account, debit, credit, quantity):
+        """Post a balanced journal entry whose valuation-account line carries
+        the given product quantity and direction.
+
+        Mirrors the two ways Odoo 19 populates the valuation account:
+        invoice/COGS entries store an *unsigned* quantity (direction only in
+        debit/credit), while stock-move entries store a *signed* one.
+        """
+        counterpart = self.env["account.account"].search(
+            [("account_type", "=", "expense")],
+            limit=1,
+        )
+        move = self.env["account.move"].create(
+            {
+                "move_type": "entry",
+                "journal_id": self.general_journal.id,
+                "line_ids": [
+                    Command.create(
+                        {
+                            "account_id": account.id,
+                            "product_id": product.id,
+                            "quantity": quantity,
+                            "debit": debit,
+                            "credit": credit,
+                            "name": "valuation",
+                        }
+                    ),
+                    Command.create(
+                        {
+                            "account_id": counterpart.id,
+                            "debit": credit,
+                            "credit": debit,
+                            "name": "counterpart",
+                        }
+                    ),
+                ],
+            }
+        )
+        move.action_post()
+        return move
 
     def test_01_stock_receipt(self):
         """Receive into stock and ship to the customer"""
@@ -119,3 +165,46 @@ class TestStockAccountValuationReport(TestStockValuationCommon):
             Domain("product_id", "=", self.product_fifo_auto.id)
         )
         self.assertEqual(sum(inv_aml.mapped("balance")), 0.0)
+
+    def test_04_accounting_qty_mixed_quantity_sign(self):
+        """Accounting quantity must net incoming against outgoing regardless of
+        how each valuation line signed its quantity.
+
+        On the valuation account Odoo 19 mixes two conventions: invoice/COGS
+        lines store an unsigned quantity (direction only in debit/credit) while
+        stock-move lines store a signed one. Receiving 10 then shipping 4 via a
+        COGS line (unsigned +4) and 4 via a stock-move line (signed -4) must
+        leave an accounting quantity of 2 -- the on-hand. Trusting the stored
+        sign double-counts one of the two outgoing lines.
+        """
+        product = self.product_fifo_auto
+        valuation_account = product._get_product_accounts()["stock_valuation"]
+        # Incoming 10 (debit, unsigned +10)
+        self._post_valuation_entry(product, valuation_account, 1000.0, 0.0, 10.0)
+        # Outgoing 4 via COGS convention (credit, unsigned +4)
+        self._post_valuation_entry(product, valuation_account, 0.0, 400.0, 4.0)
+        # Outgoing 4 via stock-move convention (credit, signed -4)
+        self._post_valuation_entry(product, valuation_account, 0.0, 400.0, -4.0)
+        product._compute_inventory_value()
+        self.assertEqual(product.account_qty_at_date, 2.0)
+
+    def test_05_qty_discrepancy_search_nets_signed_outgoing(self):
+        """The qty-discrepancy search must net a signed outgoing line, not add it.
+
+        Receiving 4 then shipping 4 via a stock-move line (signed -4) leaves an
+        accounting quantity of 0, matching the (empty) stock side, so the
+        product is NOT discrepant and must be excluded from the search. The old
+        expression added the signed line instead of subtracting it, computing 8
+        and wrongly flagging the product. This drives the search path
+        (_get_discrepancy_product_ids), distinct from the compute above.
+        """
+        product = self.product_fifo_auto
+        valuation_account = product._get_product_accounts()["stock_valuation"]
+        # Incoming 4 (debit, unsigned +4)
+        self._post_valuation_entry(product, valuation_account, 400.0, 0.0, 4.0)
+        # Outgoing 4 via stock-move convention (credit, signed -4)
+        self._post_valuation_entry(product, valuation_account, 0.0, 400.0, -4.0)
+        discrepant = self.env["product.product"].search(
+            Domain("qty_discrepancy", "!=", 0)
+        )
+        self.assertNotIn(product, discrepant)
